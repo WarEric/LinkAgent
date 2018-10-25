@@ -13,7 +13,7 @@
 
 Logger::Logger(std::string file):level(INFO), cli(1)
 {
-	if((fd = open(file.c_str(), O_WRONLY|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) < 0){
+	if((fd = open(file.c_str(), O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) < 0){
 		std::cerr << "create logfile " << file << " fail." << std::endl;
 		fd = -1;
 	}

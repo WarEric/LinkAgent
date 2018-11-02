@@ -19,6 +19,7 @@ connections it support).
 #include <unordered_map>
 #include <queue>
 #include <list>
+#include <memory>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -32,6 +33,7 @@ connections it support).
 #include <errno.h>
 #include "strings.h"
 #include "linkagent.h"
+#include "simplecode.h"
 #include "Logger.h"
 
 #define STRERR(errno) (std::to_string(errno)+" "+std::string(strerror(errno)))
@@ -39,6 +41,7 @@ connections it support).
 #define PORT		65530
 #define BACKLOG		10
 #define MAXEPOLL	100
+#define LEN		24
 
 using std::cout;
 using std::cerr;
@@ -50,6 +53,8 @@ using std::unordered_map;
 using std::make_pair;
 using std::queue;
 using std::list;
+using std::shared_ptr;
+using std::make_shared;
 
 void init();
 int run(int listen_fd);
@@ -57,6 +62,7 @@ void schedule();
 pid_t exec_bandwith_task(LinkTask task);
 pid_t exec_delay_task(LinkTask task);
 void commit_task(LinkTask task);
+void clear_pipe(int fd);
 void myexit();
 
 int create_iperf_server(string logfile);
@@ -65,7 +71,12 @@ int establish_tcp_listener(uint16_t port, int backlog);
 void handle_signal();
 void sigint_handler(int signo);
 
+void add_reply(int sockfd, string result);
+int retrive_bandwith(int fd);
+
 ssize_t read_line(int fd, void *vptr, ssize_t maxlen);
+ssize_t readn(int fd, void *vptr, size_t n);
+ssize_t writen(int fd, const void *vptr, size_t n);
 void set_cloexec(int fd);
 
 int listenfd = -1;
@@ -134,6 +145,7 @@ int run(int listen_fd)
 		return -1;
 	}
 
+	shared_ptr<Code> code = make_shared<SimpleCode>();
 	cur_fds = 1;
 	while(true)
 	{
@@ -147,6 +159,7 @@ int run(int listen_fd)
 			}
 		}
 
+		char buff[LEN];
 		for(int i = 0; i < wait_fds; i++)
 		{	
 			//handle new connection request
@@ -182,12 +195,36 @@ int run(int listen_fd)
 			{
 				if(evs[i].events & EPOLLIN)	//socket read
 				{
-					//decode request
-					//LinkTask task;
-					//commit_task(task);
-
+					if(readn(iter->first, buff, LEN) != LEN)
+					{
+						//if remote disconnection, clear socket
+						logger->error("readn from socket error");
+						//return a error reply.
+					}else{
+						LinkTask linktask = code->decode(buff);
+						if(linktask.type == LinkTask::ERROR)
+						{
+							logger->error("decode error");
+							//return a error reply.
+						}else{
+							linktask.sockfd = iter->first;
+							commit_task(linktask);
+							schedule();
+						}
+					}
 				}else if(evs[i].events & EPOLLOUT){//socket write
-					//deal with reply;
+					if(!iter->second.reply.empty())
+					{
+						memset(buff, 0, LEN);
+						string result = iter->second.reply.front();
+						iter->second.reply.pop();
+						memcpy(buff, result.c_str(), result.size());
+						if(writen(iter->first, buff, LEN) != LEN)
+						{
+							logger->error("writen error");
+							//close this socket and remove relevant task
+						}
+					}
 				}else{
 					logger->warn("epoll receive unrequest event");
 				}
@@ -200,7 +237,24 @@ int run(int listen_fd)
 			{
 				if(evs[i].events & EPOLLIN)
 				{
-					//read child pid result from pipe, add it to reply queue and log, remove this fd.
+					int rate = retrive_bandwith(it->first);
+					if(rate < 0)
+					{
+						logger->error("retrive bandwith result error");
+						//return a error reply
+					}else{
+						add_reply(it->second, code->encode_bandwith(rate));
+
+					}
+					
+					ev.events = EPOLLIN;
+					ev.data.fd = it->first;
+					if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, it->first, &ev) < 0)
+					{
+						logger->fatal("epoll_ctl error : " + STRERR(errno));
+						return -1;
+					}
+					clear_pipe(it->first);
 				}
 				continue;
 			}
@@ -363,6 +417,14 @@ pid_t exec_delay_task(LinkTask task)
 
 void commit_task(LinkTask task)
 {
+	//finish nexthop task here, this is a temporary function.
+	//
+	//
+	//
+	//
+	//
+	//
+
 	auto it = task_map.find(task.destination);
 	if(it == task_map.end())
 	{
@@ -374,6 +436,25 @@ void commit_task(LinkTask task)
 	}
 
 	logger->trace("commit a task " + task.destination );
+}
+
+void clear_pipe(int fd)
+{
+	unordered_map<string, int>::iterator it;
+	for(it = task_pipefd_map.begin(); it != task_pipefd_map.end(); ++it)
+	{
+		if(it->second == fd)
+			break;
+	}
+
+	string task;
+	if(it != task_pid_map.end())
+		task = it->first;
+
+	task_pipefd_map.erase(task);
+	task_pid_map.erase(task);
+	bandwith_pipefd_sockfd_map.erase(fd);
+	delay_pipefd_sockfd_map.erase(fd);
 }
 
 void myexit()
@@ -549,6 +630,44 @@ void sigint_handler(int signo)
 	myexit();
 }
 
+void add_reply(int sockfd, string result)
+{
+	auto it = sockfd_client_map.find(sockfd);
+	if(it == sockfd_client_map.end())
+	{
+		logger->warn("no client map with sockfd " + to_string(sockfd));
+		return;
+	}
+
+	it->second.reply.push(result);
+}
+
+int retrive_bandwith(int fd)
+{
+	char line[MAXLINE];
+	int n = 0;
+	string lastline, result;
+	while((n = read_line(fd, line, MAXLINE)) > 0)
+	{
+		if(lastline.find("Server Report:") != string::npos)
+		{
+			result = string(line);
+			while(read(fd, line, MAXLINE) > 0)
+				;
+			break;
+		}
+		lastline = string(line);
+	}
+
+	if(result.empty())
+		return -1;
+
+	size_t pos = result.find('(') + 1;
+	size_t len = result.find(')') - pos;
+	result = result.substr(pos, len);
+	return stoi(result);
+}
+
 /**
  * I copy this from UNIX Network Programming [W. Richard Stevens].
  * It may not the best way. :)
@@ -583,6 +702,56 @@ ssize_t read_line(int fd, void *vptr, ssize_t maxlen)
 	}
 	*ptr = 0;
 	return(n);
+}
+
+/**
+ * I copy this from UNIX Network Programming [W. Richard Stevens].
+ *
+**/
+ssize_t readn(int fd, void *vptr, size_t n)
+{
+	size_t nleft;
+	ssize_t nread;
+	char *ptr;
+	ptr = (char *)vptr;
+	nleft = n;
+	while(nleft > 0){
+		if((nread = read(fd, ptr, nleft)) < 0){
+			if(errno == EINTR)
+				nread = 0;	/* call read again() */
+			else
+				return (-1);
+		}else if(nread == 0)
+			break;			/* EOF */
+		nleft -= nread;
+		ptr += nread;
+	}
+	return (n-nleft);			/* return >= 0 */
+}
+
+/**
+ * I copy this from UNIX Network Programming [W. Richard Stevens].
+ *
+**/
+ssize_t writen(int fd, const void *vptr, size_t n)
+{
+	size_t nleft;
+	ssize_t nwritten;
+	const char *ptr;
+
+	ptr = (char *)vptr;
+	nleft = n;
+	while(nleft > 0){
+		if((nwritten = write(fd, ptr, nleft)) <= 0){
+			if(nwritten < 0 && errno == EINTR)
+				nwritten = 0;			/* call write() again */
+			else
+				return (-1);			/* error */
+		}
+		nleft -= nwritten;
+		ptr += nwritten;
+	}
+	return (n);
 }
 
 void set_cloexec(int fd)

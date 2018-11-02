@@ -23,10 +23,18 @@ class LinkTask{
 		enum TYPE{
 			BANDWIDTH,
 			DELAY,
+			NEXTHOP,
+			ERROR,
 		};
+
+		LinkTask():type(ERROR){}
+
+		//This is a temporary function for experiment
+		LinkTask(int fd, std::string dst):type(NEXTHOP), sockfd(fd), destination(dst){}
 
 		LinkTask(int fd, std::string dst, std::string c):type(DELAY), sockfd(fd),
 				 program("ping"), destination(dst), count(c){}
+
 		LinkTask(int fd, std::string dst, std::string band, std::string t):type(BANDWIDTH), sockfd(fd),
 				 program("iperf"), protocol("-u"), destination(dst), bandwith(band), time(t){}
 

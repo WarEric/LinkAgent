@@ -5,7 +5,7 @@ bandwith detecting program "iperf" and system network tool "ping", we get
 bandwith and delay data. The linkagent exposes a tcp socket for users. While
 receving a link request from tcp socket, linkagent will transfor your request
 to iperf or ping command and execute it in a child process. The linkagent will
-retreive the result from child process and reply it to client. From previous 
+analysis the result from child process and reply it to client. From previous 
 introduction, you may guess that "iperf" and "ping" program must be installed
 in your system. That's right, they are assumed to be installed in your system.
 	This program supports high concurrent connections(I don't test how many
@@ -63,6 +63,7 @@ pid_t exec_bandwith_task(LinkTask task);
 pid_t exec_delay_task(LinkTask task);
 void commit_task(LinkTask task);
 void clear_pipe(int fd);
+void clear_socket(int sockfd);
 void myexit();
 
 int create_iperf_server(string logfile);
@@ -72,7 +73,8 @@ void handle_signal();
 void sigint_handler(int signo);
 
 void add_reply(int sockfd, string result);
-int retrive_bandwith(int fd);
+float analysis_bandwith(int fd);
+float analysis_delay(int fd);
 
 ssize_t read_line(int fd, void *vptr, ssize_t maxlen);
 ssize_t readn(int fd, void *vptr, size_t n);
@@ -197,15 +199,23 @@ int run(int listen_fd)
 				{
 					if(readn(iter->first, buff, LEN) != LEN)
 					{
-						//if remote disconnection, clear socket
 						logger->error("readn from socket error");
-						//return a error reply.
+						clear_socket(iter->first);
+
+						ev.events = EPOLLIN | EPOLLOUT;
+						ev.data.fd = iter->first;
+						if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, iter->first, &ev) < 0)
+						{
+							logger->fatal("epoll_ctl error : " + STRERR(errno));
+							return -1;
+						}
+						continue;
 					}else{
 						LinkTask linktask = code->decode(buff);
 						if(linktask.type == LinkTask::ERROR)
 						{
 							logger->error("decode error");
-							//return a error reply.
+							add_reply(iter->first, code->encode_error());
 						}else{
 							linktask.sockfd = iter->first;
 							commit_task(linktask);
@@ -222,11 +232,18 @@ int run(int listen_fd)
 						if(writen(iter->first, buff, LEN) != LEN)
 						{
 							logger->error("writen error");
-							//close this socket and remove relevant task
+							clear_socket(iter->first);
+
+							ev.events = EPOLLIN | EPOLLOUT;
+							ev.data.fd = iter->first;
+							if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, iter->first, &ev) < 0)
+							{
+								logger->fatal("epoll_ctl error : " + STRERR(errno));
+								return -1;
+							}
+							continue;
 						}
 					}
-				}else{
-					logger->warn("epoll receive unrequest event");
 				}
 				continue;
 			}
@@ -237,11 +254,11 @@ int run(int listen_fd)
 			{
 				if(evs[i].events & EPOLLIN)
 				{
-					int rate = retrive_bandwith(it->first);
+					float rate = analysis_bandwith(it->first);
 					if(rate < 0)
 					{
-						logger->error("retrive bandwith result error");
-						//return a error reply
+						logger->error("analysis bandwith result error");
+						add_reply(it->second, code->encode_error());
 					}else{
 						add_reply(it->second, code->encode_bandwith(rate));
 
@@ -256,6 +273,7 @@ int run(int listen_fd)
 					}
 					clear_pipe(it->first);
 				}
+				schedule();
 				continue;
 			}
 
@@ -265,8 +283,23 @@ int run(int listen_fd)
 			{
 				if(evs[i].events & EPOLLIN)
 				{
-					//read child pid result from pipe, add it to reply queue, remove this fd.
+					float delay = analysis_delay(it->first);
+					if(delay < 0)
+					{
+						logger->error("analysis delay result error");
+						add_reply(it->second, code->encode_error());
+					}
+
+					ev.events = EPOLLIN;
+					ev.data.fd = it->first;
+					if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, it->first, &ev) < 0)
+					{
+						logger->fatal("epoll_ctl error : " + STRERR(errno));
+						return -1;
+					}
+					clear_pipe(it->first);
 				}
+				schedule();
 				continue;
 			}
 
@@ -280,7 +313,7 @@ int run(int listen_fd)
 			ev.data.fd = wait_pipe.front();
 			if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, wait_pipe.front(), &ev) < 0)
 			{
-				logger->error("epoll error " + STRERR(errno));
+				logger->error("epoll_ctl error " + STRERR(errno));
 				//rm contains map and reply error in client
 				close(wait_pipe.front());
 			}
@@ -309,7 +342,8 @@ void schedule()
 			if(exec_bandwith_task(task) < 0)
 			{
 				logger->error("schedule bandwidth task for error");
-				//reply client error
+				SimpleCode code;
+				add_reply(task.sockfd, code.encode_error());
 			}else{
 				logger->debug("task " + iter->first + " start run");
 			}
@@ -321,7 +355,8 @@ void schedule()
 			if(exec_delay_task(task) < 0)
 			{
 				logger->error("schedule delay task for error");
-				//reply client error
+				SimpleCode code;
+				add_reply(task.sockfd, code.encode_error());
 			}else{
 				logger->debug("task " + iter->first + " start run");
 			}
@@ -457,6 +492,13 @@ void clear_pipe(int fd)
 	delay_pipefd_sockfd_map.erase(fd);
 }
 
+void clear_socket(int sockfd)
+{
+	sockfd_client_map.erase(sockfd);
+
+	logger->info("sockfd " + to_string(sockfd) + " disconnected.");
+	close(sockfd);
+}
 void myexit()
 {
 	//close listen socket
@@ -642,7 +684,7 @@ void add_reply(int sockfd, string result)
 	it->second.reply.push(result);
 }
 
-int retrive_bandwith(int fd)
+float analysis_bandwith(int fd)
 {
 	char line[MAXLINE];
 	int n = 0;
@@ -666,6 +708,28 @@ int retrive_bandwith(int fd)
 	size_t len = result.find(')') - pos;
 	result = result.substr(pos, len);
 	return stoi(result);
+}
+
+float analysis_delay(int fd)
+{
+	char line[MAXLINE];
+	size_t pos;
+	int n = 0, count = 0;
+	float time = 0.0f;
+	while((n = read_line(fd, line, MAXLINE)) > 0)
+	{
+		string str(line);
+		if((pos = str.find("time=")) == string::npos)
+			continue;
+
+		time += stof(str.substr(pos+6, str.find("ms")-pos-6-1));
+		count++;
+	}
+
+	if(time == 0)
+		return -1;
+	time /= 2.0;
+	return time/(float)count;
 }
 
 /**

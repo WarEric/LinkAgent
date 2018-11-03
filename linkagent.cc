@@ -71,6 +71,7 @@ int establish_tcp_listener(uint16_t port, int backlog);
 
 void handle_signal();
 void sigint_handler(int signo);
+void sigchld_handler(int signo);
 
 void add_reply(int sockfd, string result);
 float analysis_bandwith(int fd);
@@ -116,6 +117,7 @@ void init()
 		logger->fatal("create iperf server failed");
 		myexit();
 	}
+	logger->trace("iperf_server_pid = " + to_string(iperf_server_pid));
 
 	//establish socket listen
 	if((listenfd = establish_tcp_listener(PORT, BACKLOG))  < 0)
@@ -499,6 +501,7 @@ void clear_socket(int sockfd)
 	logger->info("sockfd " + to_string(sockfd) + " disconnected.");
 	close(sockfd);
 }
+
 void myexit()
 {
 	//close listen socket
@@ -607,6 +610,7 @@ int create_iperf_server(string logfile)
 		close(STDIN_FILENO);
 		dup2(logfd, STDOUT_FILENO);
 		dup2(logfd, STDERR_FILENO);
+		close(logfd);
 		if(execlp("iperf", "iperf", "-u", "-s", NULL) < 0){
 			logger->fatal("create iperf server execlp error");
 			//it should signal parent agent
@@ -658,10 +662,17 @@ void handle_signal()
 	struct sigaction sa;
 	
 	sa.sa_handler = sigint_handler;
-	sigemptyset(&sa.sa_mask);
-
+	sigfillset(&sa.sa_mask);
 	if(sigaction(SIGINT, &sa, NULL) == -1){
 		logger->fatal("add sigaction SIGINT fail");
+		myexit();
+	}
+
+	struct sigaction sga;
+	sga.sa_handler = sigchld_handler;
+	sigemptyset(&sga.sa_mask);
+	if(sigaction(SIGCHLD, &sga, NULL) == -1){
+		logger->fatal("add sigaction SIGCHLD fail");
 		myexit();
 	}
 }
@@ -670,6 +681,16 @@ void sigint_handler(int signo)
 {	
 	logger->debug("receive SIGINT");
 	myexit();
+}
+
+void sigchld_handler(int signo)
+{
+	logger->debug("receive SIGCHLD");
+	pid_t pid;
+	while((pid = waitpid(-1, NULL, WNOHANG)) > 0)
+	{
+		logger->trace("child process " + to_string(pid) + " dead");
+	}
 }
 
 void add_reply(int sockfd, string result)
@@ -828,34 +849,3 @@ void set_cloexec(int fd)
 			logger->warn("set fd " + to_string(fd) + " close-on-exec error");
 	}
 }
-
-/*
-	
-	char line[MAXLINE];
-	int n = 0;
-	string lastline, result;
-	while( (n = read_line(fd[0], line, MAXLINE)) > 0)
-	{
-		if(lastline.find("Server Report:") != string::npos)
-		{
-			result = string(line);
-			//read rest content, let child progress end.
-			while(read(fd[0], line, MAXLINE) > 0)
-				;
-			break;
-		}
-		lastline = string(line);
-	}
-
-	size_t pos = result.find('(') + 1;
-	size_t len = result.find(')') - pos;
-	result = result.substr(pos, len);
-	cout << "ratio: " <<result << endl;
-
-	if(waitpid(pid, NULL, 0) < 0)
-		cerr << "wait error" << endl;
-
-	cout << "link detect finished !" << endl;
-	return 0;
-}
-*/

@@ -12,13 +12,15 @@
 #define TYPE_NEXTHOP		0
 #define TYPE_BANDWIDTH		1
 #define TYPE_DELAY		2
+#define TYPE_ERROR		255
 
 class Code{
 	public:
 		virtual LinkTask decode(char buff[]) = 0;
 		virtual std::string encode_next_hop(std::string) = 0;
-		virtual std::string encode_bandwith(int drop) = 0;
-		virtual std::string encode_delay(int delay) = 0;
+		virtual std::string encode_bandwith(float drop) = 0;
+		virtual std::string encode_delay(float delay) = 0;
+		virtual std::string encode_error() = 0;
 		
 		virtual ~Code(){}
 	protected:

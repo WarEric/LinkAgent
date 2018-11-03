@@ -48,9 +48,11 @@ std::string SimpleCode::encode_next_hop(std::string dst)
 	return string(buff);
 }
 
-std::string SimpleCode::encode_bandwith(int drop)
+std::string SimpleCode::encode_bandwith(float drop)
 {
 	string rate(to_string(drop));
+	if(rate.size() > 10)
+		rate = rate.substr(0, 10);
 	short len = 5 + rate.size();
 	char buff[MAXLINE];
 	memset(buff, 0, MAXLINE);
@@ -62,9 +64,11 @@ std::string SimpleCode::encode_bandwith(int drop)
 	return string(buff);
 }
 
-std::string SimpleCode::encode_delay(int delay)
+std::string SimpleCode::encode_delay(float delay)
 {
 	string lay(to_string(delay));
+	if(lay.size() > 10)
+		lay = lay.substr(0, 10);
 	short len = 5 + lay.size();
 	char buff[MAXLINE];
 	memset(buff, 0, MAXLINE);
@@ -72,6 +76,18 @@ std::string SimpleCode::encode_delay(int delay)
 	memcpy(buff, &len, 4);
 	buff[4] = TYPE_DELAY;
 	memcpy(buff+5, lay.c_str(), lay.size());
+
+	return string(buff);
+}
+
+std::string SimpleCode::encode_error()
+{
+	short len = 5;
+	char buff[MAXLINE];
+	memset(buff, 0, MAXLINE);
+
+	memcpy(buff, &len, 4);
+	buff[4] = TYPE_ERROR;
 
 	return string(buff);
 }

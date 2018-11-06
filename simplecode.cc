@@ -29,6 +29,8 @@ LinkTask SimpleCode::decode(char buff[])
 			return decode_bandwith(buff, len);
 		case TYPE_DELAY:
 			return decode_bandwith(buff, len);
+		case TYPE_PEER:
+			return decode_peer(buff, len);
 		default:
 			return LinkTask();
 	}
@@ -76,6 +78,19 @@ std::string SimpleCode::encode_delay(float delay)
 	memcpy(buff, &len, 4);
 	buff[4] = TYPE_DELAY;
 	memcpy(buff+5, lay.c_str(), lay.size());
+
+	return string(buff);
+}
+
+std::string SimpleCode::encode_peer(std::string addr)
+{
+	char buff[MAXLINE];
+	short len = 5 + addr.size();
+	memset(buff, 0, MAXLINE);
+
+	memcpy(buff, &len, 4);
+	buff[4] = TYPE_PEER;
+	memcpy(buff+5, addr.c_str(), addr.size());
 
 	return string(buff);
 }
@@ -130,4 +145,16 @@ LinkTask SimpleCode::decode_delay(char buff[], int len)
 	str[len-5] = 0;
 	std::string dst(str);
 	return LinkTask(-1, dst, "5");
+}
+
+LinkTask SimpleCode::decode_peer(char buff[], int len)
+{
+	char str[MAXLINE];
+	if(len-5 > MAXLINE-1)
+		return LinkTask();
+
+	memcpy(str, buff+5, len-5);
+	str[len-5] = 0;
+	std::string dst(str);
+	return LinkTask(-1);
 }

@@ -16,6 +16,7 @@ class SimpleCode : public Code{
 		virtual std::string encode_next_hop(std::string) override;
 		virtual std::string encode_bandwith(float drop) override;
 		virtual std::string encode_delay(float delay) override;
+		virtual std::string encode_peer(std::string) override;
 		virtual std::string encode_error() override;
 		
 		virtual ~SimpleCode(){}
@@ -23,5 +24,6 @@ class SimpleCode : public Code{
 		virtual LinkTask decode_next_hop(char buff[], int len) override;
 		virtual LinkTask decode_bandwith(char buff[], int len) override;
 		virtual LinkTask decode_delay(char buff[], int len) override;
+		virtual LinkTask decode_peer(char buff[], int len) override;
 };
 #endif

@@ -12,6 +12,7 @@
 #define TYPE_NEXTHOP		0
 #define TYPE_BANDWIDTH		1
 #define TYPE_DELAY		2
+#define TYPE_PEER		3
 #define TYPE_ERROR		255
 
 class Code{
@@ -20,6 +21,7 @@ class Code{
 		virtual std::string encode_next_hop(std::string) = 0;
 		virtual std::string encode_bandwith(float drop) = 0;
 		virtual std::string encode_delay(float delay) = 0;
+		virtual std::string encode_peer(std::string) = 0;
 		virtual std::string encode_error() = 0;
 		
 		virtual ~Code(){}
@@ -27,5 +29,6 @@ class Code{
 		virtual LinkTask decode_next_hop(char buff[], int len) = 0;
 		virtual LinkTask decode_bandwith(char buff[], int len) = 0;
 		virtual LinkTask decode_delay(char buff[], int len) = 0;
+		virtual LinkTask decode_peer(char buff[], int len) = 0;
 };
 #endif

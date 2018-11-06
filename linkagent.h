@@ -24,10 +24,14 @@ class LinkTask{
 			BANDWIDTH,
 			DELAY,
 			NEXTHOP,
+			PEER,
 			ERROR,
 		};
 
 		LinkTask():type(ERROR){}
+		
+		//This is a temporary function for experiment
+		LinkTask(int fd){type = PEER, sockfd = fd;}
 
 		//This is a temporary function for experiment
 		LinkTask(int fd, std::string dst):type(NEXTHOP), sockfd(fd), destination(dst){}

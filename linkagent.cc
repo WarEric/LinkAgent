@@ -35,6 +35,7 @@ connections it support).
 #include "linkagent.h"
 #include "simplecode.h"
 #include "Logger.h"
+#include "config.h"
 
 #define STRERR(errno) (std::to_string(errno)+" "+std::string(strerror(errno)))
 #define MAXLINE		4096
@@ -51,6 +52,8 @@ using std::string;
 using std::to_string;
 using std::unordered_map;
 using std::make_pair;
+using std::map;
+using std::set;
 using std::queue;
 using std::list;
 using std::shared_ptr;
@@ -455,12 +458,46 @@ pid_t exec_delay_task(LinkTask task)
 void commit_task(LinkTask task)
 {
 	//finish nexthop task here, this is a temporary function.
-	//
-	//
-	//
-	//
-	//
-	//
+	if(task.type == LinkTask::NEXTHOP)
+	{
+		SimpleCode code;
+		map<string, string> data;
+		if(!readfile("nexthop.config", data))
+		{
+			logger->error("read config file nexthop.config error");
+			add_reply(task.sockfd, code.encode_error());
+			return;
+		}
+		auto it = data.find(task.destination);
+		if(it != data.end())
+		{
+			add_reply(task.sockfd, code.encode_next_hop(it->second));
+			return;
+		}
+		add_reply(task.sockfd, code.encode_error());
+		return;
+	}
+
+	//finish peer task here, this is a temporary function.
+	if(task.type == LinkTask::PEER)
+	{
+		SimpleCode code;
+		set<string> data;
+		if(!readfile("peer.config", data))
+		{
+			logger->error("read config file peer.config error");
+			add_reply(task.sockfd, code.encode_error());
+			return;
+		}
+
+		if(!data.empty())
+		{
+			add_reply(task.sockfd, code.encode_peer(*(data.begin())));
+			return;
+		}
+		add_reply(task.sockfd, code.encode_error());
+		return;
+	}
 
 	auto it = task_map.find(task.destination);
 	if(it == task_map.end())

@@ -31,18 +31,18 @@ connections it support).
 #include <stdlib.h>
 #include <signal.h>
 #include <errno.h>
-#include "strings.h"
 #include "linkagent.h"
+#include "linktask.h"
 #include "simplecode.h"
+#include "reply.h"
 #include "Logger.h"
 #include "config.h"
 
 #define STRERR(errno) (std::to_string(errno)+" "+std::string(strerror(errno)))
 #define MAXLINE		4096
 #define PORT		65530
-#define BACKLOG		10
-#define MAXEPOLL	100
-#define LEN		24
+#define BACKLOG		100
+#define MAXEPOLL	1000
 
 using std::cout;
 using std::cerr;
@@ -71,12 +71,11 @@ void myexit();
 
 int create_iperf_server(string logfile);
 int establish_tcp_listener(uint16_t port, int backlog);
-
 void handle_signal();
 void sigint_handler(int signo);
 void sigchld_handler(int signo);
 
-void add_reply(int sockfd, string result);
+void add_reply(int sockfd, Reply result);
 float analysis_bandwith(int fd);
 float analysis_delay(int fd);
 
@@ -166,7 +165,7 @@ int run(int listen_fd)
 			}
 		}
 
-		char buff[LEN];
+		unsigned char buff[LEN];
 		for(int i = 0; i < wait_fds; i++)
 		{	
 			//handle new connection request
@@ -180,7 +179,7 @@ int run(int listen_fd)
 
 				int port = ntohs(cliaddr.sin_port);
 				string addr = string(inet_ntoa(cliaddr.sin_addr));
-				logger->info("client " + addr +":"+ to_string(port) + " connected");
+				logger->info("client " + addr +":"+ to_string(port) + " connected, sockfd = " +  to_string(conn_fd));
 
 				ev.events = EPOLLIN | EPOLLOUT;
 				ev.data.fd = conn_fd;
@@ -202,52 +201,75 @@ int run(int listen_fd)
 			{
 				if(evs[i].events & EPOLLIN)	//socket read
 				{
-					if(readn(iter->first, buff, LEN) != LEN)
+					logger->trace("sockfd " + to_string(iter->first) + " EPOLLIN ready");
+					int rn = 0;
+					if((rn = readn(iter->first, buff, LEN)) != LEN)
 					{
-						logger->error("readn from socket error");
-						clear_socket(iter->first);
-
-						ev.events = EPOLLIN | EPOLLOUT;
-						ev.data.fd = iter->first;
-						if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, iter->first, &ev) < 0)
+						if(rn == 0){
+							logger->info("remote socket "+ to_string(iter->first) + " closed");
+						}else{
+							logger->error("readn from socket error");
+							logger->debug("read "+to_string(rn)+" bytes from socket "+to_string(iter->first));
+						}
+						if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, iter->first, NULL) < 0)
 						{
 							logger->fatal("epoll_ctl error : " + STRERR(errno));
 							return -1;
 						}
+						cur_fds--;
+						clear_socket(iter->first);
 						continue;
 					}else{
+						logger->debug("read "+to_string(rn)+" bytes from socket "+to_string(iter->first));
 						LinkTask linktask = code->decode(buff);
 						if(linktask.type == LinkTask::ERROR)
 						{
 							logger->error("decode error");
 							add_reply(iter->first, code->encode_error());
 						}else{
+							logger->trace("decode linktask success");
 							linktask.sockfd = iter->first;
 							commit_task(linktask);
 							schedule();
 						}
 					}
-				}else if(evs[i].events & EPOLLOUT){//socket write
-					if(!iter->second.reply.empty())
+				}
+				
+				if(evs[i].events & EPOLLOUT){//socket write
+					if(iter->second.reply.empty() == false)
 					{
 						memset(buff, 0, LEN);
-						string result = iter->second.reply.front();
+						Reply result = iter->second.reply.front();
 						iter->second.reply.pop();
-						memcpy(buff, result.c_str(), result.size());
-						if(writen(iter->first, buff, LEN) != LEN)
-						{
-							logger->error("writen error");
-							clear_socket(iter->first);
 
-							ev.events = EPOLLIN | EPOLLOUT;
-							ev.data.fd = iter->first;
-							if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, iter->first, &ev) < 0)
+						if(result.encode(buff, LEN) == false)
+						{
+							logger->error("encode reply to binary bits error");
+							if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, iter->first, NULL) < 0)
 							{
 								logger->fatal("epoll_ctl error : " + STRERR(errno));
 								return -1;
 							}
+							cur_fds--;
+							clear_socket(iter->first);
 							continue;
 						}
+
+						int wn = 0;
+						if((wn = writen(iter->first, buff, LEN)) != LEN)
+						{
+							logger->error("writen error");
+							logger->debug("writen " + to_string(wn) + "bytes");
+							if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, iter->first, NULL) < 0)
+							{
+								logger->fatal("epoll_ctl error : " + STRERR(errno));
+								return -1;
+							}
+							cur_fds--;
+							clear_socket(iter->first);
+							continue;
+						}
+						logger->debug("writen "+to_string(wn)+" bytes to sockfd "+to_string(iter->first));
 					}
 				}
 				continue;
@@ -269,13 +291,13 @@ int run(int listen_fd)
 
 					}
 					
-					ev.events = EPOLLIN;
-					ev.data.fd = it->first;
-					if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, it->first, &ev) < 0)
+					if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, it->first, NULL) < 0)
 					{
 						logger->fatal("epoll_ctl error : " + STRERR(errno));
 						return -1;
 					}
+					logger->debug("delete pipefd " + to_string(it->first) + " from epoll");
+					cur_fds--;
 					clear_pipe(it->first);
 				}
 				schedule();
@@ -288,20 +310,24 @@ int run(int listen_fd)
 			{
 				if(evs[i].events & EPOLLIN)
 				{
+					logger->trace("socked "+ to_string(it->first) + " EPOLLIN ready");
 					float delay = analysis_delay(it->first);
 					if(delay < 0)
 					{
 						logger->error("analysis delay result error");
 						add_reply(it->second, code->encode_error());
+					}else{
+						logger->trace("add analysis delay result to reply");
+						add_reply(it->second, code->encode_delay(delay));
 					}
 
-					ev.events = EPOLLIN;
-					ev.data.fd = it->first;
-					if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, it->first, &ev) < 0)
+					if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, it->first, NULL) < 0)
 					{
 						logger->fatal("epoll_ctl error : " + STRERR(errno));
 						return -1;
 					}
+					logger->debug("delete pipefd " + to_string(it->first) + " from epoll");
+					cur_fds--;
 					clear_pipe(it->first);
 				}
 				schedule();
@@ -322,6 +348,8 @@ int run(int listen_fd)
 				//rm contains map and reply error in client
 				close(wait_pipe.front());
 			}
+			logger->debug("add pipefd " + to_string(ev.data.fd) + " EPOLLIN to epoll");
+			cur_fds++;
 			wait_pipe.pop();
 		}
 	}
@@ -375,6 +403,7 @@ void schedule()
 
 pid_t exec_bandwith_task(LinkTask task)
 {
+	logger->trace("exec bandwith task ip="+task.destination+", bw="+task.bandwith+", time="+task.time);
 	pid_t pid;
 	int fd[2];
 
@@ -457,9 +486,11 @@ pid_t exec_delay_task(LinkTask task)
 
 void commit_task(LinkTask task)
 {
+	logger->trace("committed a task");
 	//finish nexthop task here, this is a temporary function.
 	if(task.type == LinkTask::NEXTHOP)
 	{
+		logger->debug("search nexthop network of " + task.destination);
 		SimpleCode code;
 		map<string, string> data;
 		if(!readfile("nexthop.config", data))
@@ -481,6 +512,7 @@ void commit_task(LinkTask task)
 	//finish peer task here, this is a temporary function.
 	if(task.type == LinkTask::PEER)
 	{
+		logger->debug("exec get peer task");
 		SimpleCode code;
 		set<string> data;
 		if(!readfile("peer.config", data))
@@ -514,6 +546,7 @@ void commit_task(LinkTask task)
 
 void clear_pipe(int fd)
 {
+	logger->debug("clear pipe fd " + to_string(fd));
 	unordered_map<string, int>::iterator it;
 	for(it = task_pipefd_map.begin(); it != task_pipefd_map.end(); ++it)
 	{
@@ -535,7 +568,16 @@ void clear_socket(int sockfd)
 {
 	sockfd_client_map.erase(sockfd);
 
-	logger->info("sockfd " + to_string(sockfd) + " disconnected.");
+	struct sockaddr_in cliaddr;
+	socklen_t len = sizeof(cliaddr);
+	if(getpeername(sockfd, (struct sockaddr *)&cliaddr, &len) == -1)
+	{
+		logger->warn("could't get ip and port of sockfd " + to_string(sockfd));
+		logger->info("sockfd " + to_string(sockfd) + " disconnected.");
+	}
+	string ip = string(inet_ntoa(cliaddr.sin_addr));
+	int port = ntohs(cliaddr.sin_port);
+	logger->info("client " + ip + ":" + to_string(port) + " disconnected");
 	close(sockfd);
 }
 
@@ -730,7 +772,7 @@ void sigchld_handler(int signo)
 	}
 }
 
-void add_reply(int sockfd, string result)
+void add_reply(int sockfd, Reply result)
 {
 	auto it = sockfd_client_map.find(sockfd);
 	if(it == sockfd_client_map.end())
@@ -739,6 +781,7 @@ void add_reply(int sockfd, string result)
 		return;
 	}
 
+	logger->trace("add reply for sockfd " + to_string(sockfd));
 	it->second.reply.push(result);
 }
 
@@ -770,6 +813,7 @@ float analysis_bandwith(int fd)
 
 float analysis_delay(int fd)
 {
+	logger->debug("analysis delay for sockfd " + to_string(fd));
 	char line[MAXLINE];
 	size_t pos;
 	int n = 0, count = 0;
@@ -787,6 +831,7 @@ float analysis_delay(int fd)
 	if(time == 0)
 		return -1;
 	time /= 2.0;
+	logger->trace("analysis delay = " + to_string(time/(float)count) + "ms for sockfd " + to_string(fd));
 	return time/(float)count;
 }
 

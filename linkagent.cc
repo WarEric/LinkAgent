@@ -35,7 +35,7 @@ connections it support).
 #include "linktask.h"
 #include "simplecode.h"
 #include "reply.h"
-#include "Logger.h"
+#include "logger.h"
 #include "config.h"
 
 #define STRERR(errno) (std::to_string(errno)+" "+std::string(strerror(errno)))

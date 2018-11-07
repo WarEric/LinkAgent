@@ -36,6 +36,9 @@ class Logger{
 
 		//this will add time and level in head, insert a new line
 		int write_log(LEVEL level, int fd, const void *buf, size_t count);
+		int write_screen(LEVEL level, int fd, const void *buf, size_t count);
+		
+		std::string logtime();
 
 		int level;				// trace < debug < info < warn < error < fatal
 		int fd;					// logfd

@@ -40,19 +40,82 @@ Logger::~Logger()
 	if(fd > 0) close(fd);
 }
 
+void Logger::trace(std::string msg)
+{
+	if(fd < 0) return;
+
+	if(level <= TRACE)
+	{
+		write_log(TRACE, fd, msg.c_str(), msg.size());
+		if(cli)
+			write_screen(TRACE, STDOUT_FILENO, msg.c_str(), msg.size());
+	}
+}
+
+void Logger::debug(std::string msg)
+{
+	if(fd < 0) return;
+
+	if(level <= DEBUG)
+	{
+		write_log(DEBUG, fd, msg.c_str(), msg.size());
+		if(cli)
+			write_screen(DEBUG, STDOUT_FILENO, msg.c_str(), msg.size());
+	}
+}
+
+void Logger::info(std::string msg)
+{
+	if(fd < 0) return;
+
+	if(level <= INFO)
+	{
+		write_log(INFO, fd, msg.c_str(), msg.size());
+		if(cli)
+			write_screen(INFO, STDOUT_FILENO, msg.c_str(), msg.size());
+	}
+}
+
+void Logger::warn(std::string msg)
+{
+	if(fd < 0) return;
+
+	if(level <= WARN)
+	{
+		write_log(WARN, fd, msg.c_str(), msg.size());
+		if(cli)
+			write_screen(WARN, STDOUT_FILENO, msg.c_str(), msg.size());
+	}
+}
+
+void Logger::error(std::string msg)
+{
+	if(fd < 0) return;
+
+	if(level <= ERROR)
+	{
+		write_log(ERROR, fd, msg.c_str(), msg.size());
+		if(cli)
+			write_screen(ERROR, STDOUT_FILENO, msg.c_str(), msg.size());
+	}
+}
+
+void Logger::fatal(std::string msg)
+{
+	if(fd < 0) return;
+
+	if(level <= FATAL)
+	{
+		write_log(FATAL, fd, msg.c_str(), msg.size());
+		if(cli)
+			write_screen(FATAL, STDOUT_FILENO, msg.c_str(), msg.size());
+	}
+}
+
 int Logger::write_log(LEVEL level, int fd, const void *buf, size_t count)
 {
-	//I got the time code from internet, though it isn't efficient.
-	struct timeval  tv;
-	char	timeArray[40];
-	std::stringstream ss;
-
-        gettimeofday(&tv, NULL);
-        memset(timeArray, 0, sizeof(timeArray));
-        strftime(timeArray, sizeof(timeArray) - 1, "%F %T", localtime(&tv.tv_sec));
-	ss << std::string(timeArray) << "." << tv.tv_usec;
-
-	write(fd, ss.str().c_str(), ss.str().size());
+	std::string time = logtime();
+	write(fd, time.c_str(), time.size());
 	switch(level){
 		case TRACE:
 			write(fd, " TRACE: ", strlen(" TRACE: "));
@@ -80,74 +143,61 @@ int Logger::write_log(LEVEL level, int fd, const void *buf, size_t count)
 	return n;
 }
 
-void Logger::trace(std::string msg)
+int Logger::write_screen(LEVEL level, int fd, const void *buf, size_t count)
 {
-	if(fd < 0) return;
-
-	if(level <= TRACE)
-	{
-		write_log(TRACE, fd, msg.c_str(), msg.size());
-		if(cli)
-			write_log(TRACE, STDOUT_FILENO, msg.c_str(), msg.size());
+	std::string time = logtime();
+	switch(level){
+		case TRACE:
+			time.insert(0, "\033[36m");			//deepgreen
+			write(fd, time.c_str(), time.size());
+			write(fd, " TRACE: ", strlen(" TRACE: "));
+			break;
+		case DEBUG:
+			time.insert(0, "\033[32m");			//green
+			write(fd, time.c_str(), time.size());
+			write(fd, " DEBUG: ", strlen(" DEBUG: "));
+			break;
+		case INFO:
+			time.insert(0, "\033[34m");			//blue
+			write(fd, time.c_str(), time.size());
+			write(fd, " INFO: ", strlen(" INFO: "));
+			break;
+		case WARN:
+			time.insert(0, "\033[35m");			//purple
+			write(fd, time.c_str(), time.size());
+			write(fd, " WARN: ", strlen(" WARN: "));
+			break;
+		case ERROR:
+			time.insert(0, "\033[33m");			//yellow
+			write(fd, time.c_str(), time.size());
+			write(fd, " ERROR: ", strlen(" ERROR: "));
+			break;
+		case FATAL:
+			time.insert(0, "\033[31m");			//red
+			write(fd, time.c_str(), time.size());
+			write(fd, " FATAL: ", strlen(" FATAL: "));
+			break;
+		default:
+			break;
 	}
+	int n = write(fd, buf, count);
+	write(fd, "\033[0m\n", strlen("\033[0m\n"));
+	return n;
 }
 
-void Logger::debug(std::string msg)
+/**
+ * I got the time code from internet, though it isn't efficient.
+ **/
+std::string Logger::logtime()
 {
-	if(fd < 0) return;
+	struct timeval  tv;
+	char	timeArray[40];
+	std::stringstream ss;
 
-	if(level <= DEBUG)
-	{
-		write_log(DEBUG, fd, msg.c_str(), msg.size());
-		if(cli)
-			write_log(DEBUG, STDOUT_FILENO, msg.c_str(), msg.size());
-	}
-}
-
-void Logger::info(std::string msg)
-{
-	if(fd < 0) return;
-
-	if(level <= INFO)
-	{
-		write_log(INFO, fd, msg.c_str(), msg.size());
-		if(cli)
-			write_log(INFO, STDOUT_FILENO, msg.c_str(), msg.size());
-	}
-}
-
-void Logger::warn(std::string msg)
-{
-	if(fd < 0) return;
-
-	if(level <= WARN)
-	{
-		write_log(WARN, fd, msg.c_str(), msg.size());
-		if(cli)
-			write_log(WARN, STDOUT_FILENO, msg.c_str(), msg.size());
-	}
-}
-
-void Logger::error(std::string msg)
-{
-	if(fd < 0) return;
-
-	if(level <= ERROR)
-	{
-		write_log(ERROR, fd, msg.c_str(), msg.size());
-		if(cli)
-			write_log(ERROR, STDOUT_FILENO, msg.c_str(), msg.size());
-	}
-}
-
-void Logger::fatal(std::string msg)
-{
-	if(fd < 0) return;
-
-	if(level <= FATAL)
-	{
-		write_log(FATAL, fd, msg.c_str(), msg.size());
-		if(cli)
-			write_log(FATAL, STDOUT_FILENO, msg.c_str(), msg.size());
-	}
+        gettimeofday(&tv, NULL);
+        memset(timeArray, 0, sizeof(timeArray));
+        strftime(timeArray, sizeof(timeArray) - 1, "%F %T", localtime(&tv.tv_sec));
+	ss << std::string(timeArray) << "." << tv.tv_usec;
+	
+	return ss.str();
 }

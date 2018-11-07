@@ -12,18 +12,18 @@
 
 class SimpleCode : public Code{
 	public:
-		virtual LinkTask decode(char buff[]) override;
-		virtual std::string encode_next_hop(std::string) override;
-		virtual std::string encode_bandwith(float drop) override;
-		virtual std::string encode_delay(float delay) override;
-		virtual std::string encode_peer(std::string) override;
-		virtual std::string encode_error() override;
+		virtual LinkTask decode(unsigned char buff[]) override;
+		virtual Reply encode_next_hop(std::string network) override;
+		virtual Reply encode_bandwith(float drop) override;
+		virtual Reply encode_delay(float delay) override;
+		virtual Reply encode_peer(std::string ip) override;
+		virtual Reply encode_error() override;
 		
 		virtual ~SimpleCode(){}
 	protected:
-		virtual LinkTask decode_next_hop(char buff[], int len) override;
-		virtual LinkTask decode_bandwith(char buff[], int len) override;
-		virtual LinkTask decode_delay(char buff[], int len) override;
-		virtual LinkTask decode_peer(char buff[], int len) override;
+		virtual LinkTask decode_next_hop(unsigned char buff[], uint32_t len) override;
+		virtual LinkTask decode_bandwith(unsigned char buff[], uint32_t len) override;
+		virtual LinkTask decode_delay(unsigned char buff[], uint32_t len) override;
+		virtual LinkTask decode_peer(unsigned char buff[], uint32_t len) override;
 };
 #endif

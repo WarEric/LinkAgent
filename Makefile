@@ -9,7 +9,7 @@ reply.o:reply.cc reply.h
 config.o:config.cc config.h
 	g++ -Wall -std=c++11 -c config.cc
 logger.o:logger.cc logger.h
-	g++ -Wall -std=c++11 -c logger.cc
+	g++ -Wall -std=c++11 -c logger.cc -lpthread
 
 clean:
 	- rm -f *.o
